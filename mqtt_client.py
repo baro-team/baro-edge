@@ -132,7 +132,8 @@ class VehicleMqttClient:
 
     def _on_disconnect(self, client, userdata, rc):
         self.is_connected = False
-        print(f"[{self.vehicle_id}] MQTT 연결 끊김 (rc={rc})")
+        reason = {0:"정상", 1:"프로토콜 오류", 2:"클라이언트ID 거부", 3:"서버 불가", 4:"인증 실패", 5:"권한 없음"}.get(rc, f"알 수 없음")
+        print(f"[{self.vehicle_id}] MQTT 연결 끊김 rc={rc} ({reason})")
         if self.on_disconnected:
             self.on_disconnected()
 

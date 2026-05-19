@@ -305,10 +305,10 @@ class Vehicle:
         if not self.buffer.is_empty():
             buffered = self.buffer.flush()
             self.mqtt.publish_buffered(buffered)
-            print(f"[taxi_{self.vehicle_id:03d}] 버퍼 flush — {len(buffered)}개 전송")
+            print(f"[taxi_{self.vehicle_id:03d}] 버퍼 flush - {len(buffered)}개 전송")
 
     def _on_disconnected(self):
-        print(f"[taxi_{self.vehicle_id:03d}] 연결 끊김 — 버퍼 모드 시작")
+        print(f"[taxi_{self.vehicle_id:03d}] 연결 끊김 - 버퍼 모드 시작")
 
     # ----------------------------------------------------------------
     # telemetry / snapshot 빌드
