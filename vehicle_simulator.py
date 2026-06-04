@@ -14,6 +14,8 @@ import random
 import sys
 from datetime import datetime, timezone
 
+import aiomqtt
+
 # --mode local → config_local.py
 # --mode aws   → config_aws.py (기본값)
 _parser = argparse.ArgumentParser()
@@ -84,26 +86,32 @@ class Vehicle:
         self.mqtt.on_disconnected = self._on_disconnected
 
     # ----------------------------------------------------------------
-    # 메인 루프
+    # 메인 루프 — reconnect loop
     # ----------------------------------------------------------------
     async def run(self):
-        self.mqtt.connect()
-
-        # 연결 대기 (최대 10초)
-        for _ in range(20):
-            if self.mqtt.is_connected:
-                break
-            await asyncio.sleep(0.5)
-
-        if not self.mqtt.is_connected:
-            print(f"[taxi_{self.vehicle_id:03d}] 연결 실패 — 재시도 대기 중")
-        # snapshot은 _on_connected 콜백에서 전송 (연결 보장)
-
+        reconnect_delay = 2
         while True:
+            try:
+                async with self.mqtt.session() as listener:
+                    await self._telemetry_loop(listener)
+            except (aiomqtt.MqttError, OSError) as e:
+                print(f"[taxi_{self.vehicle_id:03d}] 연결 오류: {e} — {reconnect_delay}초 후 재연결")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 60)
+            except asyncio.CancelledError:
+                raise
+
+    async def _telemetry_loop(self, listener: asyncio.Task):
+        while True:
+            # 수신 루프가 예기치 않게 종료된 경우 재연결 트리거
+            if listener.done():
+                exc = listener.exception() if not listener.cancelled() else None
+                raise aiomqtt.MqttError(f"수신 루프 종료: {exc}")
+
             await asyncio.sleep(TELEMETRY_INTERVAL / SIM_SPEED)
 
             self._drain_sensors()
-            alerts   = self._check_thresholds()
+            alerts    = self._check_thresholds()
             telemetry = self._build_telemetry(alerts)
 
             if self.mqtt.is_connected:
@@ -242,8 +250,11 @@ class Vehicle:
             self._on_arrived()
 
     def _on_arrived(self):
-        print(f"[taxi_{self.vehicle_id:03d}] 목적지 도착 — trip_id={self.trip_id}")
-        self.mqtt.publish_arrived(self.trip_id)
+        if self.status == "relocating":
+            print(f"[taxi_{self.vehicle_id:03d}] 재배차 목적지 도착 — 대기 전환")
+        else:
+            print(f"[taxi_{self.vehicle_id:03d}] 목적지 도착 — trip_id={self.trip_id}")
+            self.mqtt.publish_arrived(self.trip_id)
         self.status      = "idle"
         self.trip_id     = None
         self.route       = []
@@ -257,8 +268,8 @@ class Vehicle:
         cmd_type = payload.get("type")
 
         if cmd_type == "DISPATCH":
-            # 이미 운행 중이면 현재 trip 완료 처리 후 수락
-            if self.status != "idle":
+            # 재배차 이동 중이면 즉시 중단하고 배차 수락, 운행 중이면 무시
+            if self.status not in ("idle", "relocating"):
                 print(f"[taxi_{self.vehicle_id:03d}] 운행 중 DISPATCH 무시 "
                       f"(status={self.status})")
                 return
@@ -279,6 +290,19 @@ class Vehicle:
                   f"trip={self.trip_id} 경로 {len(self.route)}개 좌표 "
                   f"평균속도={self.speed_mps*3.6:.1f}km/h")
             self.mqtt.publish_ack(self.trip_id, "DISPATCH")
+
+        elif cmd_type == "RELOCATE":
+            self.route         = payload["route"]
+            self.route_index   = 0
+            self.status        = "relocating"
+            self.autonomy_mode = "auto"
+            distance_m = payload.get("distance_m")
+            duration_s = payload.get("duration_s")
+            if distance_m and duration_s and duration_s > 0:
+                self.speed_mps = distance_m / duration_s
+            print(f"[taxi_{self.vehicle_id:03d}] 재배차 이동 명령 수신 — "
+                  f"경로 {len(self.route)}개 좌표 "
+                  f"평균속도={self.speed_mps*3.6:.1f}km/h")
 
         elif cmd_type == "REROUTE":
             self.route       = payload["route"]
@@ -384,8 +408,18 @@ async def main():
         for i in range(vehicle_count)
     ]
     print(f"차량 {vehicle_count}대 시뮬레이터 시작")
-    await asyncio.gather(*[v.run() for v in vehicles])
+
+    # IoT Core 연결 속도 제한(100/초) 초과 방지: 1초에 10대씩 연결
+    tasks = []
+    for i, v in enumerate(vehicles):
+        tasks.append(asyncio.create_task(v.run()))
+        if (i + 1) % 10 == 0:
+            await asyncio.sleep(1.2)
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())

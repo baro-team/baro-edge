@@ -1,151 +1,151 @@
 """
-AWS IoT Core (또는 로컬 Mosquitto) MQTT 클라이언트
-- 연결 / 재연결 처리
-- telemetry publish
-- commands 수신 콜백
+AWS IoT Core / Mosquitto MQTT 클라이언트 — aiomqtt 기반 asyncio 네이티브
+- 백그라운드 스레드 없음: GIL 경쟁 · keepalive deadline miss 제거
+- publish: fire-and-forget (asyncio.create_task)
+- 재연결: Vehicle.run() 의 reconnect loop 에서 관리
 """
 
+import asyncio
 import json
-import os
 import ssl
-import paho.mqtt.client as mqtt
+from contextlib import asynccontextmanager
+from typing import Optional, Callable
+
+import aiomqtt
 from config import MQTT_BROKER_HOST, MQTT_BROKER_PORT
+
+
+def _build_tls_context() -> Optional[ssl.SSLContext]:
+    if MQTT_BROKER_PORT != 8883:
+        return None
+    try:
+        from config import CERT_PATH, KEY_PATH, CA_PATH
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.load_verify_locations(CA_PATH)
+        ctx.load_cert_chain(CERT_PATH, KEY_PATH)
+        return ctx
+    except ImportError:
+        print("[MQTT] 경고: 8883 포트인데 인증서 설정 없음")
+        return None
 
 
 class VehicleMqttClient:
 
     def __init__(self, vehicle_id: str):
-        self.vehicle_id = vehicle_id
+        self.vehicle_id   = vehicle_id
         self.is_connected = False
+        self._client: Optional[aiomqtt.Client] = None
 
-        # 콜백 (vehicle_simulator에서 주입)
-        self.on_command = None       # 배차 명령 수신 시
-        self.on_connected = None     # 연결 완료 시
-        self.on_disconnected = None  # 연결 끊김 시
-
-        self._client = mqtt.Client(client_id=f"vehicle-{vehicle_id}")
-        self._client.on_connect    = self._on_connect
-        self._client.on_disconnect = self._on_disconnect
-        self._client.on_message    = self._on_message
+        self.on_command:      Optional[Callable] = None
+        self.on_connected:    Optional[Callable] = None
+        self.on_disconnected: Optional[Callable] = None
 
     # ----------------------------------------------------------------
-    # 연결
-    # ----------------------------------------------------------------
-    def connect(self):
-        # AWS IoT Core (포트 8883) 사용 시 TLS 인증서 자동 적용
-        if MQTT_BROKER_PORT == 8883:
-            try:
-                from config import CERT_PATH, KEY_PATH, CA_PATH
-                self._client.tls_set(
-                    ca_certs=CA_PATH,
-                    certfile=CERT_PATH,
-                    keyfile=KEY_PATH,
-                    tls_version=ssl.PROTOCOL_TLS_CLIENT
-                )
-                self._client.tls_insecure_set(False)
-            except ImportError:
-                print("[MQTT] 경고: 8883 포트인데 인증서 설정이 없습니다")
-
-        self._client.connect_async(MQTT_BROKER_HOST, MQTT_BROKER_PORT, keepalive=10)
-        self._client.loop_start()   # 백그라운드 네트워크 루프
-
-    def disconnect(self):
-        self._client.loop_stop()
-        self._client.disconnect()
-
-    # ----------------------------------------------------------------
-    # Publish
+    # Publish (동기 인터페이스 — 내부에서 asyncio.create_task 사용)
+    # vehicle_simulator.py 코드 변경 최소화
     # ----------------------------------------------------------------
     def publish_telemetry(self, payload: dict):
-        """실시간 위치/상태 (QoS 0)"""
-        topic = f"vehicles/{self.vehicle_id}/telemetry"
-        self._publish(topic, payload, qos=0)
+        self._fire(f"vehicles/{self.vehicle_id}/telemetry", payload, qos=0)
 
     def publish_buffered(self, buffered_list: list):
-        """재연결 후 버퍼 flush (QoS 1)"""
-        topic = f"vehicles/{self.vehicle_id}/telemetry/buffered"
-        payload = {
+        self._fire(f"vehicles/{self.vehicle_id}/telemetry/buffered", {
             "vehicle_id": self.vehicle_id,
-            "buffered": buffered_list
-        }
-        self._publish(topic, payload, qos=1)
+            "buffered":   buffered_list,
+        }, qos=1)
 
     def publish_ack(self, trip_id: str, command_type: str = "DISPATCH"):
-        """명령 수신 확인 (QoS 1)"""
-        topic = f"vehicles/{self.vehicle_id}/ack"
-        payload = {
-            "vehicle_id": self.vehicle_id,
+        self._fire(f"vehicles/{self.vehicle_id}/ack", {
+            "vehicle_id":   self.vehicle_id,
             "command_type": command_type,
-            "trip_id": trip_id
-        }
-        self._publish(topic, payload, qos=1)
+            "trip_id":      trip_id,
+        }, qos=1)
 
     def publish_snapshot(self, snapshot: dict):
-        """주행 시작 시 차량 전체 상태 1회 전송 (QoS 1)"""
-        topic = f"vehicles/{self.vehicle_id}/snapshot"
-        self._publish(topic, snapshot, qos=1)
+        self._fire(f"vehicles/{self.vehicle_id}/snapshot", snapshot, qos=1)
 
     def publish_event(self, event_code: str, detail: dict = None):
-        """경고 이벤트 (QoS 1)"""
-        topic = f"vehicles/{self.vehicle_id}/events"
-        payload = {
+        self._fire(f"vehicles/{self.vehicle_id}/events", {
             "vehicle_id": self.vehicle_id,
             "event_type": "WARNING",
-            "code": event_code,
-            "detail": detail or {}
-        }
-        self._publish(topic, payload, qos=1)
+            "code":       event_code,
+            "detail":     detail or {},
+        }, qos=1)
 
     def publish_arrived(self, trip_id: str):
-        """목적지 도착 이벤트 (QoS 1)"""
-        topic = f"vehicles/{self.vehicle_id}/events"
-        payload = {
+        self._fire(f"vehicles/{self.vehicle_id}/events", {
             "vehicle_id": self.vehicle_id,
             "event_type": "ARRIVED",
-            "trip_id": trip_id
-        }
-        self._publish(topic, payload, qos=1)
+            "trip_id":    trip_id,
+        }, qos=1)
 
-    # ----------------------------------------------------------------
-    # 내부 헬퍼
-    # ----------------------------------------------------------------
-    def _publish(self, topic: str, payload: dict, qos: int):
-        if not self.is_connected:
+    def _fire(self, topic: str, payload: dict, qos: int):
+        if not self.is_connected or self._client is None:
             return
-        self._client.publish(topic, json.dumps(payload), qos=qos)
+        asyncio.create_task(self._do_publish(topic, payload, qos))
+
+    async def _do_publish(self, topic: str, payload: dict, qos: int):
+        if not self.is_connected or self._client is None:
+            return
+        try:
+            await self._client.publish(topic, json.dumps(payload), qos=qos)
+        except aiomqtt.MqttError:
+            pass
 
     # ----------------------------------------------------------------
-    # 내부 콜백
+    # 메시지 수신 루프
     # ----------------------------------------------------------------
-    def _on_connect(self, client, userdata, flags, rc):
-        if rc == 0:
+    async def _listen(self):
+        try:
+            async for message in self._client.messages:
+                try:
+                    payload = json.loads(message.payload.decode())
+                    if "/commands" in str(message.topic):
+                        print(f"[{self.vehicle_id}] 명령 수신: {payload.get('type')}")
+                        if self.on_command:
+                            self.on_command(payload)
+                except Exception as e:
+                    print(f"[{self.vehicle_id}] 메시지 파싱 오류: {e}")
+        except Exception as e:
+            print(f"[{self.vehicle_id}] 수신 루프 비정상 종료: {e}")
+            raise
+
+    # ----------------------------------------------------------------
+    # 연결 컨텍스트 매니저 (Vehicle.run() 에서 사용)
+    # ----------------------------------------------------------------
+    @asynccontextmanager
+    async def session(self):
+        tls = _build_tls_context()
+        kwargs = dict(
+            hostname=MQTT_BROKER_HOST,
+            port=MQTT_BROKER_PORT,
+            identifier=f"vehicle-{self.vehicle_id}",
+            keepalive=60,
+            clean_session=False,  # persistent session: IoT Core buffers QoS 1 commands while offline
+        )
+        if tls:
+            kwargs["tls_context"] = tls
+
+        async with aiomqtt.Client(**kwargs) as client:
+            self._client = client
             self.is_connected = True
             print(f"[{self.vehicle_id}] MQTT 연결 완료")
 
-            # commands 토픽 구독
-            client.subscribe(f"vehicles/{self.vehicle_id}/commands", qos=1)
+            await client.subscribe(f"vehicles/{self.vehicle_id}/commands", qos=1)
 
             if self.on_connected:
                 self.on_connected()
-        else:
-            print(f"[{self.vehicle_id}] MQTT 연결 실패 rc={rc}")
 
-    def _on_disconnect(self, client, userdata, rc):
-        self.is_connected = False
-        reason = {0:"정상", 1:"프로토콜 오류", 2:"클라이언트ID 거부", 3:"서버 불가", 4:"인증 실패", 5:"권한 없음"}.get(rc, f"알 수 없음")
-        print(f"[{self.vehicle_id}] MQTT 연결 끊김 rc={rc} ({reason})")
-        if self.on_disconnected:
-            self.on_disconnected()
-
-    def _on_message(self, client, userdata, msg):
-        try:
-            payload = json.loads(msg.payload.decode())
-            topic   = msg.topic
-
-            if "/commands" in topic:
-                print(f"[{self.vehicle_id}] 명령 수신: {payload.get('type')}")
-                if self.on_command:
-                    self.on_command(payload)
-
-        except Exception as e:
-            print(f"[{self.vehicle_id}] 메시지 파싱 오류: {e}")
+            listener = asyncio.create_task(self._listen())
+            try:
+                yield listener  # caller can monitor listener health
+            finally:
+                if not listener.done():
+                    listener.cancel()
+                try:
+                    await listener
+                except (asyncio.CancelledError, Exception):
+                    pass
+                self.is_connected = False
+                self._client = None
+                if self.on_disconnected:
+                    self.on_disconnected()
