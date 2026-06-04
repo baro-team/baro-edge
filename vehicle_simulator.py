@@ -341,7 +341,7 @@ class Vehicle:
         self.seq += 1
         payload = {
             "seq":           self.seq,
-            "vehicle_id":    self.vehicle_id,
+            "car_id":        self.vehicle_id,
             "latitude":      self.latitude,
             "longitude":     self.longitude,
             "speed":         self.speed,
