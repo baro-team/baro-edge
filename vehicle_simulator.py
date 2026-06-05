@@ -56,6 +56,7 @@ class Vehicle:
         self.trip_id       = None
         self.seq           = 0
         self.speed_mps     = SIM_VEHICLE_SPEED / 3.6  # 기본값, DISPATCH 시 덮어씀
+        self.phase         = "to_pickup"  # 현재 이동 phase 추적
 
         # 센서 초기값 (차량마다 랜덤)
         self.battery       = random.randint(60, 100)
@@ -253,9 +254,10 @@ class Vehicle:
         if self.status == "relocating":
             print(f"[taxi_{self.vehicle_id:03d}] 재배차 목적지 도착 — 대기 전환")
         else:
-            print(f"[taxi_{self.vehicle_id:03d}] 목적지 도착 — trip_id={self.trip_id}")
-            self.mqtt.publish_arrived(self.trip_id)
+            print(f"[taxi_{self.vehicle_id:03d}] 목적지 도착 ({self.phase}) — trip_id={self.trip_id}")
+            self.mqtt.publish_arrived(self.trip_id, self.phase)
         self.status      = "idle"
+        self.phase       = "to_pickup"
         self.trip_id     = None
         self.route       = []
         self.route_index = 0
@@ -279,6 +281,7 @@ class Vehicle:
             self.route_index   = 0
             # phase: "to_pickup"(1차, 차→출발지) | "to_dest"(2차, 출발지→목적지)
             phase = payload.get("phase", "to_pickup")
+            self.phase         = phase
             self.status        = "moving_to_pickup" if phase == "to_pickup" else "driving"
             self.autonomy_mode = "auto"
             # 서버가 준 거리/예상시간으로 차량이 직접 평균 속도 계산

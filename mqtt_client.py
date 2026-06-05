@@ -71,11 +71,12 @@ class VehicleMqttClient:
             "detail":     detail or {},
         }, qos=1)
 
-    def publish_arrived(self, trip_id: str):
+    def publish_arrived(self, trip_id: str, phase: str = "to_pickup"):
         self._fire(f"vehicles/{self.vehicle_id}/events", {
             "vehicle_id": self.vehicle_id,
             "event_type": "ARRIVED",
             "trip_id":    trip_id,
+            "phase":      phase,
         }, qos=1)
 
     def _fire(self, topic: str, payload: dict, qos: int):
