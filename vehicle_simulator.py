@@ -45,8 +45,9 @@ from config import (
 
 class Vehicle:
 
-    def __init__(self, vehicle_id: int, initial_pos: dict):
+    def __init__(self, vehicle_id: int, initial_pos: dict, car_number: str):
         self.vehicle_id    = vehicle_id
+        self.car_number    = car_number
         self.latitude      = initial_pos["lat"]
         self.longitude     = initial_pos["lng"]
         self.speed         = 0
@@ -117,7 +118,7 @@ class Vehicle:
 
             if self.mqtt.is_connected:
                 self.mqtt.publish_telemetry(telemetry)
-                print(f"[taxi_{self.vehicle_id:03d}] "
+                print(f"[taxi_{self.vehicle_id:03d}|{self.car_number}] "
                       f"lat={self.latitude:.5f} lng={self.longitude:.5f} "
                       f"spd={self.speed} bat={self.battery}% "
                       f"status={self.status} seq={self.seq}"
@@ -345,6 +346,7 @@ class Vehicle:
         payload = {
             "seq":           self.seq,
             "car_id":        self.vehicle_id,
+            "car_number":    self.car_number,
             "latitude":      self.latitude,
             "longitude":     self.longitude,
             "speed":         self.speed,
@@ -363,6 +365,7 @@ class Vehicle:
     def _publish_snapshot(self):
         snapshot = {
             "vehicle_id":    self.vehicle_id,
+            "car_number":    self.car_number,
             "battery":       self.battery,
             "tire_pressure": self.tire_pressure,
             "engine_oil":    self.engine_oil,
@@ -397,6 +400,14 @@ class Vehicle:
 # ----------------------------------------------------------------
 # 유틸
 # ----------------------------------------------------------------
+_KOR_CHARS = list("가나다라마바사아자차카타파하")
+
+def _generate_car_number() -> str:
+    prefix = random.randint(100, 999)
+    kor    = random.choice(_KOR_CHARS)
+    suffix = random.randint(1000, 9999)
+    return f"{prefix}{kor}{suffix}"
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -405,9 +416,16 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 10
+    vehicle_count = 1
+
+    # 고유 번호판 생성
+    car_numbers: set[str] = set()
+    while len(car_numbers) < vehicle_count:
+        car_numbers.add(_generate_car_number())
+    car_number_list = list(car_numbers)
+
     vehicles = [
-        Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)])
+        Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)], car_number_list[i])
         for i in range(vehicle_count)
     ]
     print(f"차량 {vehicle_count}대 시뮬레이터 시작")
