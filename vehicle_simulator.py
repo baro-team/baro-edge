@@ -45,9 +45,9 @@ from config import (
 
 class Vehicle:
 
-    def __init__(self, vehicle_id: int, initial_pos: dict, car_number: str):
+    def __init__(self, vehicle_id: int, initial_pos: dict):
         self.vehicle_id    = vehicle_id
-        self.car_number    = car_number
+        self.car_number    = _generate_car_number(vehicle_id)
         self.latitude      = initial_pos["lat"]
         self.longitude     = initial_pos["lng"]
         self.speed         = 0
@@ -402,10 +402,11 @@ class Vehicle:
 # ----------------------------------------------------------------
 _KOR_CHARS = list("가나다라마바사아자차카타파하")
 
-def _generate_car_number() -> str:
-    prefix = random.randint(100, 999)
-    kor    = random.choice(_KOR_CHARS)
-    suffix = random.randint(1000, 9999)
+def _generate_car_number(seed: int) -> str:
+    rng    = random.Random(seed)
+    prefix = rng.randint(100, 999)
+    kor    = rng.choice(_KOR_CHARS)
+    suffix = rng.randint(1000, 9999)
     return f"{prefix}{kor}{suffix}"
 
 def _now_iso() -> str:
@@ -416,18 +417,15 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 1
-
-    # 고유 번호판 생성
-    car_numbers: set[str] = set()
-    while len(car_numbers) < vehicle_count:
-        car_numbers.add(_generate_car_number())
-    car_number_list = list(car_numbers)
+    vehicle_count = 3
 
     vehicles = [
-        Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)], car_number_list[i])
+        Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)])
         for i in range(vehicle_count)
     ]
+
+    car_numbers = [v.car_number for v in vehicles]
+    assert len(car_numbers) == len(set(car_numbers)), f"번호판 중복 발생: {car_numbers}"
     print(f"차량 {vehicle_count}대 시뮬레이터 시작")
 
     # IoT Core 연결 속도 제한(100/초) 초과 방지: 1초에 10대씩 연결
