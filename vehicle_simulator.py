@@ -436,7 +436,7 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 30
+    vehicle_count = 100
 
     vehicles = [
         Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)])
