@@ -315,6 +315,25 @@ class Vehicle:
                   f"{len(self.route)}개 좌표")
             self.mqtt.publish_ack(self.trip_id or "", "REROUTE")
 
+        elif cmd_type == "CANCEL_DISPATCH":
+            incoming_trip_id = payload.get("trip_id")
+            if self.status == "idle":
+                print(f"[taxi_{self.vehicle_id:03d}] CANCEL_DISPATCH 수신 — 이미 대기 중 (무시)")
+                return
+            if incoming_trip_id and self.trip_id and incoming_trip_id != self.trip_id:
+                print(f"[taxi_{self.vehicle_id:03d}] CANCEL_DISPATCH trip_id 불일치 "
+                      f"(수신={incoming_trip_id}, 현재={self.trip_id}) — 무시")
+                return
+            cancelled_trip = self.trip_id or incoming_trip_id or ""
+            print(f"[taxi_{self.vehicle_id:03d}] 배차 취소 수신 — trip_id={cancelled_trip} 대기 전환")
+            self.mqtt.publish_ack(cancelled_trip, "CANCEL_DISPATCH")
+            self.status      = "idle"
+            self.speed       = 0
+            self.trip_id     = None
+            self.route       = []
+            self.route_index = 0
+            self.phase       = "to_pickup"
+
         elif cmd_type == "EMERGENCY_STOP":
             print(f"[taxi_{self.vehicle_id:03d}] 긴급 정지 명령 수신")
             self.status        = "idle"
@@ -417,7 +436,7 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 3
+    vehicle_count = 30
 
     vehicles = [
         Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)])
