@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, Callable
 
 import aiomqtt
-from config import MQTT_BROKER_HOST, MQTT_BROKER_PORT
+from config import MQTT_BROKER_HOST, MQTT_BROKER_PORT, MQTT_USERNAME, MQTT_PASSWORD
 
 
 def _build_tls_context() -> Optional[ssl.SSLContext]:
@@ -20,6 +20,9 @@ def _build_tls_context() -> Optional[ssl.SSLContext]:
         return None
     try:
         from config import CERT_PATH, KEY_PATH, CA_PATH
+        if not CERT_PATH or not KEY_PATH or not CA_PATH:
+            print("[MQTT] 경고: 8883 포트인데 인증서 경로가 비어있음")
+            return None
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.load_verify_locations(CA_PATH)
         ctx.load_cert_chain(CERT_PATH, KEY_PATH)
@@ -125,6 +128,9 @@ class VehicleMqttClient:
         )
         if tls:
             kwargs["tls_context"] = tls
+        if MQTT_USERNAME:
+            kwargs["username"] = MQTT_USERNAME
+            kwargs["password"] = MQTT_PASSWORD
 
         async with aiomqtt.Client(**kwargs) as client:
             self._client = client

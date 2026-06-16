@@ -1,20 +1,21 @@
-# MQTT - 로컬 Mosquitto
-# MQTT_BROKER_HOST = "localhost"
-# MQTT_BROKER_PORT = 1883
-
-# MQTT - AWS IoT Core
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# MQTT - AWS IoT Core
-MQTT_BROKER_HOST = os.getenv("IOT_ENDPOINT")
-MQTT_BROKER_PORT = 8883
+# MQTT_BROKER_HOST: Mosquitto → EC2 private IP or "mosquitto" (docker-compose)
+#                   IoT Core  → IOT_ENDPOINT env var
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST") or os.getenv("IOT_ENDPOINT", "localhost")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 
-CERT_PATH = os.getenv("IOT_CERT_PATH")
-KEY_PATH  = os.getenv("IOT_KEY_PATH")
-CA_PATH   = os.getenv("IOT_CA_PATH")
+# IoT Core 인증서 (포트 8883일 때만 사용)
+CERT_PATH = os.getenv("IOT_CERT_PATH", "")
+KEY_PATH  = os.getenv("IOT_KEY_PATH", "")
+CA_PATH   = os.getenv("IOT_CA_PATH", "")
+
+# Mosquitto 자격증명 (allow_anonymous false 설정 시 사용)
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 
 TELEMETRY_INTERVAL = 3   # telemetry 전송 주기 (초)
