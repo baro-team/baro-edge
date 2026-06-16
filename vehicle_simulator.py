@@ -442,8 +442,9 @@ def _now_iso() -> str:
 async def main():
     vehicle_count = 100
 
+    positions = random.sample(TAXI_STAND_POSITIONS, min(vehicle_count, len(TAXI_STAND_POSITIONS)))
     vehicles = [
-        Vehicle(1001 + i, TAXI_STAND_POSITIONS[i % len(TAXI_STAND_POSITIONS)])
+        Vehicle(1001 + i, positions[i])
         for i in range(vehicle_count)
     ]
 
