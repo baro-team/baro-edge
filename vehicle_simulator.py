@@ -17,18 +17,22 @@ from datetime import datetime, timezone
 import aiomqtt
 
 # --mode local → config_local.py
-# --mode aws   → config_aws.py (기본값)
+# --mode aws   → config_aws.py
+# --mode ec2   → config.py (env vars, EC2 Mosquitto; 기본값)
 _parser = argparse.ArgumentParser()
-_parser.add_argument('--mode', choices=['local', 'aws'], default='aws',
-                     help='local: Mosquitto / aws: AWS IoT Core')
+_parser.add_argument('--mode', choices=['local', 'aws', 'ec2'], default='ec2',
+                     help='ec2: EC2 Mosquitto (env vars) / local: 로컬 Mosquitto / aws: AWS IoT Core')
 _args, _ = _parser.parse_known_args()
 
 if _args.mode == 'local':
     import config_local as _cfg
     print("[설정] 로컬 Mosquitto 모드")
-else:
+elif _args.mode == 'aws':
     import config_aws as _cfg
     print("[설정] AWS IoT Core 모드")
+else:
+    import config as _cfg
+    print("[설정] EC2 Mosquitto 모드")
 
 sys.modules['config'] = _cfg
 
