@@ -440,7 +440,7 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 100
+    vehicle_count = 10000
 
     positions = random.sample(TAXI_STAND_POSITIONS, min(vehicle_count, len(TAXI_STAND_POSITIONS)))
     vehicles = [
