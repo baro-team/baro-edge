@@ -475,10 +475,10 @@ async def main():
             if (i + 1) % 10 == 0:
                 await asyncio.sleep(1.2)
 
-        # EC2 Mosquitto는 더 빠르게 생성 가능
+        # EC2 Mosquitto: 10대마다 0.05초 대기 → 연결 폭탄 방지 (1000대 ≈ 5초에 걸쳐 연결)
         else:
-            if (i + 1) % 500 == 0:
-                await asyncio.sleep(0.1)
+            if (i + 1) % 10 == 0:
+                await asyncio.sleep(0.05)
 
     await asyncio.gather(*tasks)
 
