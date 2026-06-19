@@ -440,24 +440,45 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 10000
+    vehicle_count = 1000
 
-    positions = random.sample(TAXI_STAND_POSITIONS, min(vehicle_count, len(TAXI_STAND_POSITIONS)))
+    # 승강장 주변에 랜덤하게 차량 배치
+    def random_position():
+        base = random.choice(TAXI_STAND_POSITIONS)
+
+        return {
+            "lat": base["lat"] + random.uniform(-0.0003, 0.0003),
+            "lng": base["lng"] + random.uniform(-0.0003, 0.0003),
+        }
+
     vehicles = [
-        Vehicle(1001 + i, positions[i])
+        Vehicle(
+            1001 + i,
+            random_position()
+        )
         for i in range(vehicle_count)
     ]
 
     car_numbers = [v.car_number for v in vehicles]
-    assert len(car_numbers) == len(set(car_numbers)), f"번호판 중복 발생: {car_numbers}"
-    print(f"차량 {vehicle_count}대 시뮬레이터 시작")
+    assert len(car_numbers) == len(set(car_numbers)), \
+        f"번호판 중복 발생: {car_numbers}"
 
-    # IoT Core 연결 속도 제한(100/초) 초과 방지: 1초에 10대씩 연결
+    print(f"차량 {vehicle_count:,}대 시뮬레이터 시작")
+
     tasks = []
+
     for i, v in enumerate(vehicles):
         tasks.append(asyncio.create_task(v.run()))
-        if (i + 1) % 10 == 0:
-            await asyncio.sleep(1.2)
+
+        # AWS IoT Core 연결 제한 대응
+        if _args.mode == "aws":
+            if (i + 1) % 10 == 0:
+                await asyncio.sleep(1.2)
+
+        # EC2 Mosquitto는 더 빠르게 생성 가능
+        else:
+            if (i + 1) % 500 == 0:
+                await asyncio.sleep(0.1)
 
     await asyncio.gather(*tasks)
 
