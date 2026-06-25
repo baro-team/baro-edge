@@ -440,7 +440,17 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 1000
+    import platform
+    if platform.system() != "Windows":
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < 4096:
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (min(4096, hard), hard))
+            except Exception as e:
+                print(f"[경고] 파일 디스크립터 제한 변경 실패: {e}")
+
+    vehicle_count = 1500
 
     # 승강장 주변에 랜덤하게 차량 배치
     def random_position():
