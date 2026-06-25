@@ -440,7 +440,7 @@ def _now_iso() -> str:
 # 진입점
 # ================================================================
 async def main():
-    vehicle_count = 1000
+    vehicle_count = 1500
 
     # 승강장 주변에 랜덤하게 차량 배치
     def random_position():
